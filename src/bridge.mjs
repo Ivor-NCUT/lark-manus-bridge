@@ -10,6 +10,24 @@ export class Bridge {
     this.scopes = new Map();
   }
 
+  async recoverPending() {
+    for (const [messageId, marker] of Object.entries(this.state.data.messages)) {
+      if (marker?.status !== 'pending' || !marker.chatId) continue;
+      try {
+        const receipt = await this.channel.send(marker.chatId, {
+          text: '进程重启前的 Manus 请求结果未确认。请先到 Manus 任务列表核对；机器人不会自动重发。',
+        }, {
+          replyTo: messageId,
+          ...(marker.threadId ? { replyInThread: true } : {}),
+        });
+        if (!receipt?.messageId) throw new Error('Feishu reply missing message receipt');
+        await this.state.update((data) => { data.messages[messageId] = 'unknown'; });
+      } catch (error) {
+        console.error(`Could not report uncertain Manus request ${messageId}:`, error.message);
+      }
+    }
+  }
+
   async handleMessage(message) {
     if (message.senderIsBot === true || message.senderType === 'bot' ||
         !this.allowedUsers.has(message.senderId)) return;
@@ -100,7 +118,13 @@ export class Bridge {
       return;
     }
     await this.state.update((data) => {
-      data.messages[message.messageId] = 'pending';
+      data.messages[message.messageId] = {
+        status: 'pending',
+        chatId: message.chatId,
+        threadId: scopeId.startsWith(`${message.chatId}:`)
+          ? scopeId.slice(message.chatId.length + 1)
+          : undefined,
+      };
     });
     try {
       const parts = content ? [{ type: 'text', text: content }] : [];
@@ -153,7 +177,9 @@ export class Bridge {
       await this.state.update((data) => {
         data.messages[message.messageId] = 'unknown';
       });
-      await this.channel.reply(message, { text: 'Manus 请求未确认成功，请用 /status 检查；系统不会自动重发以免重复创建任务。' });
+      await this.channel.reply(message, { text: current?.taskId
+        ? 'Manus 请求未确认成功，请用 /status 检查；系统不会自动重发。'
+        : 'Manus 请求未确认成功，请到 Manus 任务列表核对是否创建；系统不会自动重发。' });
       throw error;
     }
   }

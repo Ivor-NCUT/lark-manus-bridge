@@ -49,3 +49,25 @@ test('authorized messages bind one task, deduplicate, and survive restart', asyn
   assert.equal(data.scopes['group-1:topic-b'].taskId, 'task-3');
   assert.equal(data.messages.m1, 'done');
 });
+
+test('warns once about a pending Manus write after restart without resubmitting it', async () => {
+  const path = join(await mkdtemp(join(tmpdir(), 'manus-pending-')), 'state.json');
+  const state = await new StateStore(path).load();
+  await state.update((data) => {
+    data.messages.m7 = { status: 'pending', chatId: 'group-1', threadId: 'topic-a' };
+  });
+  const sent = [];
+  const bridge = new Bridge({
+    state: await new StateStore(path).load(),
+    channel: { send: async (...args) => { sent.push(args); return { messageId: 'warning-1' }; } },
+    manus: { createTask: () => { throw new Error('must not retry'); } },
+    allowedUsers: ['user-1'], allowedChats: ['group-1'],
+  });
+  await bridge.recoverPending();
+  await bridge.recoverPending();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][0], 'group-1');
+  assert.equal(sent[0][2].replyTo, 'm7');
+  assert.equal(sent[0][2].replyInThread, true);
+  assert.equal((await new StateStore(path).load()).message('m7'), 'unknown');
+});

@@ -34,6 +34,7 @@ channel.on({ message: (message) => bridge.handleMessage(message).catch((error) =
 }) });
 await channel.connect();
 console.log('Feishu/Lark connected.');
+await bridge.recoverPending();
 const lifecycle = new Lifecycle({ channel, manus: bridge.manus, state });
 const poll = () => lifecycle.pollAll().catch((error) => console.error('Manus status check failed:', error.message));
 await poll();
