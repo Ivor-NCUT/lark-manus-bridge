@@ -10,5 +10,8 @@
     "start": "node src/index.mjs",
     "test": "node --test"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@larksuite/channel": "^0.6.1"
+  }
 }
