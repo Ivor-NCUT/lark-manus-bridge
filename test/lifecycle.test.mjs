@@ -66,3 +66,27 @@ test('reports errors and keeps topic replies in the original thread', async () =
   assert.match(sent[0][1].text, /failed/);
   assert.equal(sent[0][2].replyInThread, true);
 });
+
+test('reports a user-stopped task after Manus confirms background work has ended', async () => {
+  const state = await new StateStore(join(await mkdtemp(join(tmpdir(), 'manus-stop-')), 'state.json')).load();
+  await state.update((data) => {
+    data.scopes.dm = {
+      taskId: 'task-3', chatId: 'dm', replyTo: 'm3',
+      status: 'stopped-by-user', startedAt: Date.now(),
+    };
+  });
+  const sent = [];
+  const lifecycle = new Lifecycle({
+    state,
+    channel: { send: async (_, payload) => { sent.push(payload.text); return { messageId: 'out-3' }; } },
+    manus: {
+      listMessages: async () => ({
+        messages: [{ id: 's3', type: 'status_update', status_update: { agent_status: 'stopped' } }],
+      }),
+      detail: async () => ({ task: { has_running_background_jobs: false } }),
+    },
+  });
+  await lifecycle.pollScope('dm');
+  assert.deepEqual(sent, ['Manus 任务已停止。']);
+  assert.equal(state.scope('dm').status, 'completed');
+});
