@@ -1,4 +1,24 @@
+import { createHash } from 'node:crypto';
+
 const QUESTION_TYPES = new Set(['messageAskUser', 'cascadeAskUser']);
+
+function textChunks(text) {
+  const chunks = [];
+  let chunk = '';
+  let size = 0;
+  for (const character of text) {
+    const bytes = Buffer.byteLength(character);
+    if (chunk && size + bytes > 8000) {
+      chunks.push(chunk);
+      chunk = '';
+      size = 0;
+    }
+    chunk += character;
+    size += bytes;
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks;
+}
 
 export class Lifecycle {
   constructor({ channel, manus, state, deadlineMs = 2 * 60 * 60_000 }) {
@@ -128,11 +148,23 @@ export class Lifecycle {
 
   async #deliver(scopeId, binding, text, status, lastEventId) {
     if (this.state.scope(scopeId)?.taskId !== binding.taskId) return;
-    const receipt = await this.channel.send(binding.chatId, { text }, {
-      replyTo: binding.replyTo,
-      ...(binding.threadId ? { replyInThread: true } : {}),
-    });
-    if (!receipt?.messageId) throw new Error('Feishu reply missing message receipt');
+    const chunks = textChunks(text);
+    for (const [index, chunk] of chunks.entries()) {
+      const uuid = createHash('sha256')
+        .update(`${scopeId}\0${binding.taskId}\0${binding.startedAt}\0${status}\0${lastEventId ?? ''}\0${index}`)
+        .digest('hex').slice(0, 32);
+      const receipt = await this.channel.rawClient.im.v1.message.reply({
+        path: { message_id: binding.replyTo },
+        data: {
+          content: JSON.stringify({ text: chunk }),
+          msg_type: 'text',
+          reply_in_thread: Boolean(binding.threadId),
+          uuid,
+        },
+      });
+      if (receipt.code && receipt.code !== 0) throw new Error(`Feishu reply failed: ${receipt.code}`);
+      if (!receipt.data?.message_id) throw new Error('Feishu reply missing message receipt');
+    }
     await this.state.update((data) => {
       if (data.scopes[scopeId]?.taskId !== binding.taskId) return;
       data.scopes[scopeId].status = status;

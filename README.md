@@ -54,7 +54,7 @@ Set `MANUS_WEBHOOK_URL` to the exact externally reachable HTTPS URL and register
 - Manus currently limits `task.create` and `task.sendMessage` to 10 requests per minute per user. Read-side 429 errors use bounded backoff; writes are not retried automatically because an uncertain result could duplicate work.
 - Up to three image/file attachments per message are accepted, each at most 20 MB after download. Voice/video are not supported. The SDK buffers received files before the size check, so keep the bot private when handling untrusted large media.
 - The state file stores task bindings and message IDs, not API credentials. Back it up before moving hosts. If a write's result is uncertain, the bot reports that state rather than resubmitting it. Pending requests found after restart also trigger a warning in the original chat.
-- A crash between a successful Feishu send and saving its receipt can cause one result to be sent again after restart. Review the task ID before acting on duplicate replies.
+- Result replies use a stable Feishu `uuid` per task event, so retries after a crash are deduplicated within Feishu's idempotency retention window. Extremely delayed retries may still repeat a result; review the task ID before acting on one.
 - A stopped main Manus run is delivered as complete only when the API reports no running background jobs. After a two-hour wait with no conclusive state, the bot reports uncertainty and continues checking.
 
 ### Container

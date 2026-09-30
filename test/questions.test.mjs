@@ -15,7 +15,9 @@ test('shows a Manus question once and sends the user answer as an ordinary messa
   const replies = [];
   const sent = [];
   const channel = {
-    send: async (_chat, body) => { replies.push(body.text); return { messageId: 'out-1' }; },
+    rawClient: { im: { v1: { message: {
+      reply: async (args) => { replies.push(JSON.parse(args.data.content).text); return { data: { message_id: 'out-1' } }; },
+    } } } },
     reply: async (_message, body) => { replies.push(body.text); },
   };
   const manus = {
@@ -50,7 +52,9 @@ test('never confirms an unknown waiting action from chat', async () => {
   });
   const sent = [];
   const channel = {
-    send: async (_chat, body) => { sent.push(body.text); return { messageId: 'out-1' }; },
+    rawClient: { im: { v1: { message: {
+      reply: async (args) => { sent.push(JSON.parse(args.data.content).text); return { data: { message_id: 'out-1' } }; },
+    } } } },
     reply: async (_message, body) => { sent.push(body.text); },
   };
   const manus = {

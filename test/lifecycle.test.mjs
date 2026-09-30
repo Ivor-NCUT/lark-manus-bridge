@@ -14,7 +14,9 @@ test('delivers only after background work finishes and does not repeat after res
   });
   const sent = [];
   let background = true;
-  const channel = { send: async (...args) => { sent.push(args); return { messageId: `out-${sent.length}` }; } };
+  const channel = { rawClient: { im: { v1: { message: {
+    reply: async (args) => { sent.push(args); return { data: { message_id: `out-${sent.length}` } }; },
+  } } } } };
   const manus = {
     listMessages: async () => ({
       messages: [
@@ -33,9 +35,9 @@ test('delivers only after background work finishes and does not repeat after res
   background = false;
   await lifecycle.pollScope('dm');
   assert.equal(sent.length, 1);
-  assert.match(sent[0][1].text, /Final answer/);
-  assert.match(sent[0][1].text, /临时下载链接/);
-  assert.match(sent[0][1].text, /report.pdf/);
+  assert.match(sent[0].data.content, /Final answer/);
+  assert.match(sent[0].data.content, /临时下载链接/);
+  assert.match(sent[0].data.content, /report.pdf/);
   state = await new StateStore(path).load();
   lifecycle = new Lifecycle({ channel, manus, state });
   await lifecycle.pollScope('dm');
@@ -54,7 +56,9 @@ test('reports errors and keeps topic replies in the original thread', async () =
   const sent = [];
   const lifecycle = new Lifecycle({
     state,
-    channel: { send: async (...args) => { sent.push(args); return { messageId: 'out-1' }; } },
+    channel: { rawClient: { im: { v1: { message: {
+      reply: async (args) => { sent.push(args); return { data: { message_id: 'out-1' } }; },
+    } } } } },
     manus: { listMessages: async () => ({
       messages: [
         { id: 'e1', type: 'error_message', error_message: { content: 'failed' } },
@@ -63,8 +67,8 @@ test('reports errors and keeps topic replies in the original thread', async () =
     }) },
   });
   await lifecycle.pollScope('group:topic');
-  assert.match(sent[0][1].text, /failed/);
-  assert.equal(sent[0][2].replyInThread, true);
+  assert.match(sent[0].data.content, /failed/);
+  assert.equal(sent[0].data.reply_in_thread, true);
 });
 
 test('reports a user-stopped task after Manus confirms background work has ended', async () => {
@@ -78,7 +82,9 @@ test('reports a user-stopped task after Manus confirms background work has ended
   const sent = [];
   const lifecycle = new Lifecycle({
     state,
-    channel: { send: async (_, payload) => { sent.push(payload.text); return { messageId: 'out-3' }; } },
+    channel: { rawClient: { im: { v1: { message: {
+      reply: async (args) => { sent.push(JSON.parse(args.data.content).text); return { data: { message_id: 'out-3' } }; },
+    } } } } },
     manus: {
       listMessages: async () => ({
         messages: [{ id: 's3', type: 'status_update', status_update: { agent_status: 'stopped' } }],
@@ -89,4 +95,36 @@ test('reports a user-stopped task after Manus confirms background work has ended
   await lifecycle.pollScope('dm');
   assert.deepEqual(sent, ['Manus 任务已停止。']);
   assert.equal(state.scope('dm').status, 'completed');
+});
+
+test('uses the same Feishu UUID after a lost state write and splits a long result', async () => {
+  const state = await new StateStore(join(await mkdtemp(join(tmpdir(), 'manus-reply-')), 'state.json')).load();
+  await state.update((data) => {
+    data.scopes.dm = { taskId: 'task-4', chatId: 'dm', replyTo: 'm4', status: 'running', startedAt: Date.now() };
+  });
+  const calls = [];
+  const channel = { rawClient: { im: { v1: { message: {
+    reply: async (args) => { calls.push(args); return { data: { message_id: `out-${calls.length}` } }; },
+  } } } } };
+  const manus = {
+    listMessages: async () => ({ messages: [
+      { id: 'a4', type: 'assistant_message', assistant_message: { content: '文'.repeat(4000), delivery_kind: 'result' } },
+      { id: 's4', type: 'status_update', status_update: { agent_status: 'stopped' } },
+    ] }),
+    detail: async () => ({ task: { has_running_background_jobs: false } }),
+  };
+  const write = state.update.bind(state);
+  let fail = true;
+  state.update = async (mutator) => {
+    if (fail) { fail = false; throw new Error('disk unavailable'); }
+    return write(mutator);
+  };
+  const lifecycle = new Lifecycle({ channel, manus, state });
+  await assert.rejects(lifecycle.pollScope('dm'), /disk unavailable/);
+  await lifecycle.pollScope('dm');
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].data.uuid, calls[2].data.uuid);
+  assert.equal(calls[1].data.uuid, calls[3].data.uuid);
+  assert.notEqual(calls[0].data.uuid, calls[1].data.uuid);
+  assert.equal(state.scope('dm').lastEventId, 's4');
 });

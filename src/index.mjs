@@ -21,6 +21,9 @@ const channel = createLarkChannel({
   policy: { dmMode: 'open', requireMention: false, respondToMentionAll: false },
   safety: { chatQueue: { enabled: false } },
 });
+if (!channel.rawClient?.im?.v1?.message?.reply) {
+  throw new Error('The Feishu channel SDK does not expose idempotent message replies');
+}
 const state = await new StateStore(process.env.BRIDGE_STATE_FILE ?? 'data/state.json').load();
 const bridge = new Bridge({
   channel,
