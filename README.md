@@ -14,6 +14,10 @@ Connect a Feishu/Lark bot to Manus API v2. Send a task in chat, continue it in t
 
 The implementation is tracked in this repository's Issues. API behavior follows the [Manus v2 documentation](https://open.manus.im/docs/v2/introduction).
 
+## Development
+
+Requires Node.js 20.12 or newer. Run `npm test` for the mocked Manus API contract. Set `MANUS_API_KEY` in your environment before `npm start`; never put the key in Git. The Feishu connection is being implemented in [Issue #2](https://github.com/Ivor-NCUT/lark-manus-bridge/issues/2).
+
 ## Attribution
 
 The architecture borrows the conversation-scoping, access-control, and reply-routing ideas of [lark-coding-agent-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge). No upstream source code has been copied into this initial repository.
