@@ -76,14 +76,20 @@ export class Bridge {
       await this.channel.reply(message, { text: '已开启新会话。下一条消息会创建新的 Manus 任务。' });
       return;
     }
+    if (content === '/help') {
+      await this.channel.reply(message, { text: '直接发送文字、图片或文件给 Manus；同一会话中的后续消息会继续当前任务。\n/new 新建任务  /status 查看状态和任务页面  /stop 停止任务  /help 查看说明' });
+      await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
+      return;
+    }
     if (content === '/status') {
       const current = this.state.scope(scopeId);
       if (!current) {
         await this.channel.reply(message, { text: '当前会话还没有 Manus 任务。' });
       } else {
         const detail = await this.manus.detail(current.taskId);
+        const taskUrl = detail.task?.task_url?.startsWith('https://') ? detail.task.task_url : current.taskUrl;
         await this.channel.reply(message, {
-          text: `Manus 任务 ${current.taskId}：${detail.task?.status ?? '状态未知'}`,
+          text: `Manus 任务 ${current.taskId}：${detail.task?.status ?? '状态未知'}${taskUrl ? `\n任务页面：${taskUrl}` : ''}`,
         });
       }
       await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
@@ -103,11 +109,16 @@ export class Bridge {
       await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
       return;
     }
-    if ((!content && !message.resources?.length) || content.startsWith('/')) return;
+    if (!content && !message.resources?.length) return;
+    if (content.startsWith('/')) {
+      await this.channel.reply(message, { text: '未知指令。发送 /help 查看可用指令。' });
+      await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
+      return;
+    }
 
     const current = this.state.scope(scopeId);
     if (current?.status === 'waiting-action') {
-      await this.channel.reply(message, { text: '此任务正在等待操作确认，请先在 Manus 页面审查并处理。' });
+      await this.channel.reply(message, { text: `此任务正在等待操作确认，请先在 Manus 页面审查并处理。${current.taskUrl ? `\n任务页面：${current.taskUrl}` : '\n发送 /status 获取任务页面。'}` });
       await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
       return;
     }
@@ -158,10 +169,12 @@ export class Bridge {
           share_visibility: 'private',
           locale: 'zh-CN',
         });
+        const taskUrl = result.task_url?.startsWith('https://') ? result.task_url : undefined;
         await this.state.update((data) => {
           data.messages[message.messageId] = 'done';
           data.scopes[scopeId] = {
             taskId: result.task_id,
+            taskUrl,
             chatId: message.chatId,
             threadId: scopeId.startsWith(`${message.chatId}:`)
               ? scopeId.slice(message.chatId.length + 1)
@@ -171,7 +184,7 @@ export class Bridge {
             startedAt: Date.now(),
           };
         });
-        await this.channel.reply(message, { text: `已创建 Manus 任务：${result.task_id}` });
+        await this.channel.reply(message, { text: `已创建 Manus 任务：${result.task_id}${taskUrl ? `\n任务页面：${taskUrl}` : ''}` });
       }
     } catch (error) {
       await this.state.update((data) => {

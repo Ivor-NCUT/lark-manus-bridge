@@ -70,6 +70,11 @@ export class Lifecycle {
     const statusEvent = [...events].reverse().find((event) => event.type === 'status_update');
     const status = statusEvent?.status_update?.agent_status;
     if (binding.lastEventId && newEvents.length === 0) return;
+    if (status === 'running' && binding.status === 'waiting-action') {
+      await this.state.update((data) => {
+        if (data.scopes[scopeId]?.taskId === binding.taskId) data.scopes[scopeId].status = 'running';
+      });
+    }
     if (!status || status === 'running') {
       if (Date.now() - binding.startedAt > this.deadlineMs && binding.status !== 'unknown') {
         await this.#deliver(scopeId, binding, 'Manus 任务仍在执行，已超过等待期限；可用 /status 查询。', 'unknown');
@@ -84,7 +89,7 @@ export class Lifecycle {
           ?? [...newEvents].reverse().find((event) => event.type === 'assistant_message');
         const expectation = question?.assistant_message?.question_expectation;
         if (expectation?.response_method && expectation.response_method !== 'send_message') {
-          await this.#deliver(scopeId, binding, 'Manus 使用了未知的提问方式，请在 Manus 页面处理。', 'waiting-action', events.at(-1)?.id);
+          await this.#deliver(scopeId, binding, `Manus 使用了未知的提问方式，请在 Manus 页面处理。${binding.taskUrl ? `\n任务页面：${binding.taskUrl}` : '\n发送 /status 获取任务页面。'}`, 'waiting-action', events.at(-1)?.id);
           return;
         }
         const options = expectation?.options?.length
@@ -106,7 +111,7 @@ export class Lifecycle {
         await this.#deliver(
           scopeId,
           binding,
-          `Manus 正等待操作确认：${detail?.waiting_description ?? '请在 Manus 页面查看'}。${schema}\n请在 Manus 页面审查并操作；机器人不会自动批准。`,
+          `Manus 正等待操作确认：${detail?.waiting_description ?? '请在 Manus 页面查看'}。${schema}\n请在 Manus 页面审查并操作；机器人不会自动批准。${binding.taskUrl ? `\n任务页面：${binding.taskUrl}` : '\n发送 /status 获取任务页面。'}`,
           'waiting-action',
           events.at(-1)?.id,
         );
@@ -122,19 +127,20 @@ export class Lifecycle {
         return;
       }
       const answers = newEvents.filter((event) =>
-        event.type === 'assistant_message' && event.assistant_message?.content?.trim());
+        event.type === 'assistant_message' &&
+        (event.assistant_message?.content?.trim() || event.assistant_message?.attachments?.length));
       const answer = [...answers].reverse().find((event) => event.assistant_message.delivery_kind === 'result')
         ?? [...answers].reverse().find((event) => event.assistant_message.delivery_kind !== 'progress')
         ?? answers.at(-1);
-      const links = (answer?.assistant_message.attachments ?? []).flatMap((attachment) => {
+      const links = [...new Set(answers.flatMap((event) => event.assistant_message.attachments ?? []).flatMap((attachment) => {
         try {
           if (new URL(attachment.url).protocol !== 'https:') return [];
           return [`- ${attachment.filename ?? '文件'}：${attachment.url}`];
         } catch {
           return [];
         }
-      });
-      const text = `${answer?.assistant_message.content ?? (binding.status === 'stopped-by-user'
+      }))];
+      const text = `${answer?.assistant_message.content?.trim() || (binding.status === 'stopped-by-user'
         ? 'Manus 任务已停止。' : 'Manus 任务已完成。')}${links.length
         ? `\n\n生成文件（临时下载链接，可能过期）：\n${links.join('\n')}`
         : ''}`;

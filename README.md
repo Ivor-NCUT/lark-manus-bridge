@@ -11,7 +11,7 @@ Connect a Feishu/Lark bot to Manus API v2. Send a task in chat, continue it in t
 - The bot reports completion, questions, errors, and stopped tasks in the originating conversation.
 - Images and files are uploaded to Manus; generated files are returned as labeled temporary download links.
 - An optional signed Manus webhook speeds up completion delivery. Periodic polling remains the recovery path.
-- `/new`, `/status`, and `/stop` manage the current conversation.
+- `/new`, `/status`, `/stop`, and `/help` manage the current conversation.
 - State survives a bridge restart. Manus API keys and Feishu app secrets stay outside Git.
 
 The work is tracked in this repository's [Issues](https://github.com/Ivor-NCUT/lark-manus-bridge/issues). API behavior follows the [Manus v2 documentation](https://open.manus.im/docs/v2/introduction).
@@ -42,8 +42,10 @@ Only listed users may invoke the bot, including inside approved groups. A group 
 | `/new` | Clear this chat/topic's task binding; the next message starts a new task |
 | `/status` | Query the bound task's current Manus status |
 | `/stop` | Ask Manus to stop the bound task |
+| `/help` | Show the bot's usage and commands |
 
 Text messages continue the bound task. For a Manus question, reply in the same chat/topic with a non-empty answer. Actions requiring confirmation must be reviewed in the Manus UI; the bot does not approve them.
+Task creation, `/status`, and action prompts include the private Manus task URL when available. Opening it requires access to the task creator's Manus account. Generated attachments are listed even when Manus returns them without answer text.
 
 ### Optional webhook
 
