@@ -105,7 +105,18 @@ export class Lifecycle {
       const answer = [...answers].reverse().find((event) => event.assistant_message.delivery_kind === 'result')
         ?? [...answers].reverse().find((event) => event.assistant_message.delivery_kind !== 'progress')
         ?? answers.at(-1);
-      await this.#deliver(scopeId, binding, answer?.assistant_message.content ?? 'Manus 任务已完成。', 'completed', events.at(-1)?.id);
+      const links = (answer?.assistant_message.attachments ?? []).flatMap((attachment) => {
+        try {
+          if (new URL(attachment.url).protocol !== 'https:') return [];
+          return [`- ${attachment.filename ?? '文件'}：${attachment.url}`];
+        } catch {
+          return [];
+        }
+      });
+      const text = `${answer?.assistant_message.content ?? 'Manus 任务已完成。'}${links.length
+        ? `\n\n生成文件（临时下载链接，可能过期）：\n${links.join('\n')}`
+        : ''}`;
+      await this.#deliver(scopeId, binding, text, 'completed', events.at(-1)?.id);
       return;
     }
     if (status === 'error' && binding.status !== 'error') {

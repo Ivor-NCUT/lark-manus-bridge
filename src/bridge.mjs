@@ -1,3 +1,5 @@
+import { basename } from 'node:path';
+
 export class Bridge {
   constructor({ channel, manus, state, allowedUsers, allowedChats }) {
     this.channel = channel;
@@ -83,7 +85,7 @@ export class Bridge {
       await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
       return;
     }
-    if (!content || content.startsWith('/')) return;
+    if ((!content && !message.resources?.length) || content.startsWith('/')) return;
 
     const current = this.state.scope(scopeId);
     if (current?.status === 'waiting-action') {
@@ -91,12 +93,34 @@ export class Bridge {
       await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
       return;
     }
+    const resources = message.resources ?? [];
+    if (resources.length > 3 || resources.some((resource) => !['image', 'file'].includes(resource.type))) {
+      await this.channel.reply(message, { text: '最多支持 3 个图片或文件附件；音视频暂不支持。' });
+      await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
+      return;
+    }
     await this.state.update((data) => {
       data.messages[message.messageId] = 'pending';
     });
     try {
+      const parts = content ? [{ type: 'text', text: content }] : [];
+      for (const resource of resources) {
+        // ponytail: the SDK buffers a received resource before its size is known;
+        // use a capped streaming downloader if large untrusted media becomes common.
+        const bytes = await this.channel.downloadResource(message.messageId, resource.fileKey, resource.type);
+        if (bytes.length > 20 * 1024 * 1024) {
+          await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
+          await this.channel.reply(message, { text: '附件超过 20 MB，请发送较小的文件。' });
+          return;
+        }
+        const filename = basename(resource.fileName ?? (resource.type === 'image' ? 'image.png' : 'attachment.bin'))
+          || 'attachment.bin';
+        const fileId = await this.manus.uploadFile(filename, bytes);
+        parts.push({ type: 'file', file_id: fileId });
+      }
+      const payload = parts.length === 1 && parts[0].type === 'text' ? content : parts;
       if (current?.taskId) {
-        await this.manus.sendMessage(current.taskId, content);
+        await this.manus.sendMessage(current.taskId, payload);
         await this.state.update((data) => {
           data.messages[message.messageId] = 'done';
           data.scopes[scopeId].replyTo = message.messageId;
@@ -105,7 +129,7 @@ export class Bridge {
         });
         await this.channel.reply(message, { text: '已发送给当前 Manus 任务。' });
       } else {
-        const result = await this.manus.createTask(content, {
+        const result = await this.manus.createTask(payload, {
           interactive_mode: true,
           share_visibility: 'private',
           locale: 'zh-CN',

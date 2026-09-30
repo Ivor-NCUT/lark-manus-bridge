@@ -39,6 +39,35 @@ export class ManusClient {
     return this.#request('POST', 'task.stop', { task_id: taskId });
   }
 
+  webhookPublicKey() {
+    return this.#request('GET', 'webhook.publicKey');
+  }
+
+  async uploadFile(filename, bytes) {
+    if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > 20 * 1024 * 1024) {
+      throw new Error('Attachment must be 1 byte to 20 MB');
+    }
+    const record = await this.#request('POST', 'file.upload', { filename });
+    const url = new URL(record.upload_url);
+    if (url.protocol !== 'https:') throw new Error('Manus returned an insecure upload URL');
+    if (Number(record.upload_expires_at) * 1000 <= Date.now()) {
+      throw new Error('Manus upload URL has expired');
+    }
+    const response = await this.fetchImpl(url, {
+      method: 'PUT',
+      body: bytes,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    if (!response.ok) throw new Error(`Manus upload failed with HTTP ${response.status}`);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const detail = await this.#request('GET', 'file.detail', undefined, { file_id: record.file.id });
+      if (detail.file?.status === 'uploaded') return record.file.id;
+      if (detail.file?.status === 'error' || detail.file?.status === 'deleted') break;
+      await this.sleep(500 * 2 ** attempt);
+    }
+    throw new Error('Manus did not confirm the uploaded file');
+  }
+
   async #request(method, endpoint, body, query) {
     const url = new URL(endpoint, BASE_URL);
     for (const [key, value] of Object.entries(query ?? {})) {

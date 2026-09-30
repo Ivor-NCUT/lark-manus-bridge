@@ -3,6 +3,7 @@ import { createLarkChannel } from '@larksuite/channel';
 import { Bridge } from './bridge.mjs';
 import { StateStore } from './state.mjs';
 import { Lifecycle } from './lifecycle.mjs';
+import { createWebhookServer } from './webhook.mjs';
 
 const required = ['MANUS_API_KEY', 'LARK_APP_ID', 'LARK_APP_SECRET', 'LARK_ALLOWED_USER_IDS'];
 const missing = required.filter((key) => !process.env[key]);
@@ -37,3 +38,8 @@ const lifecycle = new Lifecycle({ channel, manus: bridge.manus, state });
 const poll = () => lifecycle.pollAll().catch((error) => console.error('Manus status check failed:', error.message));
 await poll();
 setInterval(poll, 30_000).unref();
+if (process.env.MANUS_WEBHOOK_URL) {
+  const port = Number(process.env.PORT ?? 3000);
+  createWebhookServer({ url: process.env.MANUS_WEBHOOK_URL, manus: bridge.manus, state, lifecycle })
+    .listen(port, '0.0.0.0', () => console.log(`Manus webhook listening on port ${port}.`));
+}

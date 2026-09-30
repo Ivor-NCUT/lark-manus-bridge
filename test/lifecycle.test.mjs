@@ -18,7 +18,10 @@ test('delivers only after background work finishes and does not repeat after res
   const manus = {
     listMessages: async () => ({
       messages: [
-        { id: 'a1', type: 'assistant_message', assistant_message: { content: 'Final answer', delivery_kind: 'result' } },
+        { id: 'a1', type: 'assistant_message', assistant_message: {
+          content: 'Final answer', delivery_kind: 'result',
+          attachments: [{ filename: 'report.pdf', url: 'https://files.example.test/report.pdf' }],
+        } },
         { id: 's1', type: 'status_update', status_update: { agent_status: 'stopped' } },
       ],
     }),
@@ -30,7 +33,9 @@ test('delivers only after background work finishes and does not repeat after res
   background = false;
   await lifecycle.pollScope('dm');
   assert.equal(sent.length, 1);
-  assert.equal(sent[0][1].text, 'Final answer');
+  assert.match(sent[0][1].text, /Final answer/);
+  assert.match(sent[0][1].text, /临时下载链接/);
+  assert.match(sent[0][1].text, /report.pdf/);
   state = await new StateStore(path).load();
   lifecycle = new Lifecycle({ channel, manus, state });
   await lifecycle.pollScope('dm');
