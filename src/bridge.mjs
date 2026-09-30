@@ -56,6 +56,33 @@ export class Bridge {
       await this.channel.reply(message, { text: '已开启新会话。下一条消息会创建新的 Manus 任务。' });
       return;
     }
+    if (content === '/status') {
+      const current = this.state.scope(scopeId);
+      if (!current) {
+        await this.channel.reply(message, { text: '当前会话还没有 Manus 任务。' });
+      } else {
+        const detail = await this.manus.detail(current.taskId);
+        await this.channel.reply(message, {
+          text: `Manus 任务 ${current.taskId}：${detail.task?.status ?? '状态未知'}`,
+        });
+      }
+      await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
+      return;
+    }
+    if (content === '/stop') {
+      const current = this.state.scope(scopeId);
+      if (!current) {
+        await this.channel.reply(message, { text: '当前会话还没有 Manus 任务。' });
+      } else {
+        await this.manus.stop(current.taskId);
+        await this.state.update((data) => {
+          data.scopes[scopeId].status = 'stopped-by-user';
+        });
+        await this.channel.reply(message, { text: `已请求停止 Manus 任务 ${current.taskId}。` });
+      }
+      await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
+      return;
+    }
     if (!content || content.startsWith('/')) return;
 
     const current = this.state.scope(scopeId);
@@ -68,6 +95,8 @@ export class Bridge {
         await this.state.update((data) => {
           data.messages[message.messageId] = 'done';
           data.scopes[scopeId].replyTo = message.messageId;
+          data.scopes[scopeId].status = 'running';
+          data.scopes[scopeId].startedAt = Date.now();
         });
         await this.channel.reply(message, { text: '已发送给当前 Manus 任务。' });
       } else {
@@ -86,6 +115,7 @@ export class Bridge {
               : undefined,
             replyTo: message.messageId,
             status: 'running',
+            startedAt: Date.now(),
           };
         });
         await this.channel.reply(message, { text: `已创建 Manus 任务：${result.task_id}` });

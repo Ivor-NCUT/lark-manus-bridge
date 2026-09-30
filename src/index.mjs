@@ -2,6 +2,7 @@ import { ManusClient } from './manus.mjs';
 import { createLarkChannel } from '@larksuite/channel';
 import { Bridge } from './bridge.mjs';
 import { StateStore } from './state.mjs';
+import { Lifecycle } from './lifecycle.mjs';
 
 const required = ['MANUS_API_KEY', 'LARK_APP_ID', 'LARK_APP_SECRET', 'LARK_ALLOWED_USER_IDS'];
 const missing = required.filter((key) => !process.env[key]);
@@ -32,3 +33,7 @@ channel.on({ message: (message) => bridge.handleMessage(message).catch((error) =
 }) });
 await channel.connect();
 console.log('Feishu/Lark connected.');
+const lifecycle = new Lifecycle({ channel, manus: bridge.manus, state });
+const poll = () => lifecycle.pollAll().catch((error) => console.error('Manus status check failed:', error.message));
+await poll();
+setInterval(poll, 30_000).unref();

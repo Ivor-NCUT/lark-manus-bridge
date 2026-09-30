@@ -1,0 +1,63 @@
+import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { Lifecycle } from '../src/lifecycle.mjs';
+import { StateStore } from '../src/state.mjs';
+
+test('delivers only after background work finishes and does not repeat after restart', async () => {
+  const path = join(await mkdtemp(join(tmpdir(), 'manus-lifecycle-')), 'state.json');
+  let state = await new StateStore(path).load();
+  await state.update((data) => {
+    data.scopes.dm = { taskId: 'task-1', chatId: 'dm', replyTo: 'm1', status: 'running', startedAt: Date.now() };
+  });
+  const sent = [];
+  let background = true;
+  const channel = { send: async (...args) => { sent.push(args); return { messageId: `out-${sent.length}` }; } };
+  const manus = {
+    listMessages: async () => ({
+      messages: [
+        { id: 'a1', type: 'assistant_message', assistant_message: { content: 'Final answer', delivery_kind: 'result' } },
+        { id: 's1', type: 'status_update', status_update: { agent_status: 'stopped' } },
+      ],
+    }),
+    detail: async () => ({ task: { has_running_background_jobs: background } }),
+  };
+  let lifecycle = new Lifecycle({ channel, manus, state });
+  await lifecycle.pollScope('dm');
+  assert.equal(sent.length, 0);
+  background = false;
+  await lifecycle.pollScope('dm');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][1].text, 'Final answer');
+  state = await new StateStore(path).load();
+  lifecycle = new Lifecycle({ channel, manus, state });
+  await lifecycle.pollScope('dm');
+  assert.equal(sent.length, 1);
+  assert.equal(state.scope('dm').lastEventId, 's1');
+});
+
+test('reports errors and keeps topic replies in the original thread', async () => {
+  const state = await new StateStore(join(await mkdtemp(join(tmpdir(), 'manus-error-')), 'state.json')).load();
+  await state.update((data) => {
+    data.scopes['group:topic'] = {
+      taskId: 'task-2', chatId: 'group', threadId: 'topic', replyTo: 'm2',
+      status: 'running', startedAt: Date.now(),
+    };
+  });
+  const sent = [];
+  const lifecycle = new Lifecycle({
+    state,
+    channel: { send: async (...args) => { sent.push(args); return { messageId: 'out-1' }; } },
+    manus: { listMessages: async () => ({
+      messages: [
+        { id: 'e1', type: 'error_message', error_message: { content: 'failed' } },
+        { id: 's1', type: 'status_update', status_update: { agent_status: 'error' } },
+      ],
+    }) },
+  });
+  await lifecycle.pollScope('group:topic');
+  assert.match(sent[0][1].text, /failed/);
+  assert.equal(sent[0][2].replyInThread, true);
+});
