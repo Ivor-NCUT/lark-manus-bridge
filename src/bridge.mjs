@@ -86,6 +86,11 @@ export class Bridge {
     if (!content || content.startsWith('/')) return;
 
     const current = this.state.scope(scopeId);
+    if (current?.status === 'waiting-action') {
+      await this.channel.reply(message, { text: '此任务正在等待操作确认，请先在 Manus 页面审查并处理。' });
+      await this.state.update((data) => { data.messages[message.messageId] = 'done'; });
+      return;
+    }
     await this.state.update((data) => {
       data.messages[message.messageId] = 'pending';
     });

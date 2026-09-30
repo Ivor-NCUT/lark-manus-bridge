@@ -56,9 +56,38 @@ export class Lifecycle {
     }
     if (status === 'waiting') {
       const detail = statusEvent.status_update.status_detail;
-      if (QUESTION_TYPES.has(detail?.waiting_for_event_type)) return;
+      if (QUESTION_TYPES.has(detail?.waiting_for_event_type)) {
+        if (binding.status === 'waiting-question') return;
+        const question = events.find((event) => event.id === detail.waiting_for_event_id)
+          ?? [...newEvents].reverse().find((event) => event.type === 'assistant_message');
+        const expectation = question?.assistant_message?.question_expectation;
+        if (expectation?.response_method && expectation.response_method !== 'send_message') {
+          await this.#deliver(scopeId, binding, 'Manus 使用了未知的提问方式，请在 Manus 页面处理。', 'waiting-action', events.at(-1)?.id);
+          return;
+        }
+        const options = expectation?.options?.length
+          ? `\n可选：${expectation.options.join('、')}。也可以直接回复文字。`
+          : '\n请直接回复文字。';
+        await this.#deliver(
+          scopeId,
+          binding,
+          `Manus 需要你回答：${question?.assistant_message?.content ?? detail.waiting_description ?? '请补充信息'}${options}`,
+          'waiting-question',
+          events.at(-1)?.id,
+        );
+        return;
+      }
       if (binding.status !== 'waiting-action') {
-        await this.#deliver(scopeId, binding, `Manus 正等待操作确认：${detail?.waiting_description ?? '请在 Manus 页面查看'}。当前不会自动批准。`, 'waiting-action');
+        const schema = detail?.confirm_input_schema
+          ? `\n确认参数：${JSON.stringify(detail.confirm_input_schema)}`
+          : '';
+        await this.#deliver(
+          scopeId,
+          binding,
+          `Manus 正等待操作确认：${detail?.waiting_description ?? '请在 Manus 页面查看'}。${schema}\n请在 Manus 页面审查并操作；机器人不会自动批准。`,
+          'waiting-action',
+          events.at(-1)?.id,
+        );
       }
       return;
     }
