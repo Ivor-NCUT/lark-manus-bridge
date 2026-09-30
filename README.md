@@ -56,6 +56,7 @@ Set `MANUS_WEBHOOK_URL` to the exact externally reachable HTTPS URL and register
 - The state file stores task bindings and message IDs, not API credentials. Back it up before moving hosts. If a write's result is uncertain, the bot reports that state rather than resubmitting it. Pending requests found after restart also trigger a warning in the original chat.
 - Result replies use a stable Feishu `uuid` per task event, so retries after a crash are deduplicated within Feishu's idempotency retention window. Extremely delayed retries may still repeat a result; review the task ID before acting on one.
 - A stopped main Manus run is delivered as complete only when the API reports no running background jobs. After a two-hour wait with no conclusive state, the bot reports uncertainty and continues checking.
+- Completed tasks are omitted from routine polling. A new Feishu follow-up resumes polling, while a signed Manus webhook can report a later externally triggered run.
 
 ### Container
 

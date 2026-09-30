@@ -128,3 +128,42 @@ test('uses the same Feishu UUID after a lost state write and splits a long resul
   assert.notEqual(calls[0].data.uuid, calls[1].data.uuid);
   assert.equal(state.scope('dm').lastEventId, 's4');
 });
+
+test('skips completed tasks in routine polling but accepts a later webhook-triggered result', async () => {
+  const state = await new StateStore(join(await mkdtemp(join(tmpdir(), 'manus-poll-')), 'state.json')).load();
+  await state.update((data) => {
+    data.scopes.done = {
+      taskId: 'task-done', chatId: 'dm', replyTo: 'm5', status: 'completed',
+      startedAt: Date.now(), lastEventId: 's-old',
+    };
+    data.scopes.active = {
+      taskId: 'task-active', chatId: 'dm2', replyTo: 'm6', status: 'running', startedAt: Date.now(),
+    };
+  });
+  const queried = [];
+  const sent = [];
+  const lifecycle = new Lifecycle({
+    state,
+    channel: { rawClient: { im: { v1: { message: {
+      reply: async (args) => { sent.push(JSON.parse(args.data.content).text); return { data: { message_id: 'out-5' } }; },
+    } } } } },
+    manus: {
+      listMessages: async (taskId) => {
+        queried.push(taskId);
+        return { messages: taskId === 'task-active'
+          ? [{ id: 's-active', type: 'status_update', status_update: { agent_status: 'running' } }]
+          : [
+            { id: 's-old', type: 'status_update', status_update: { agent_status: 'stopped' } },
+            { id: 'a-new', type: 'assistant_message', assistant_message: { content: 'Later result' } },
+            { id: 's-new', type: 'status_update', status_update: { agent_status: 'stopped' } },
+          ] };
+      },
+      detail: async () => ({ task: { has_running_background_jobs: false } }),
+    },
+  });
+  await lifecycle.pollAll();
+  assert.deepEqual(queried, ['task-active']);
+  await lifecycle.pollScope('done');
+  assert.deepEqual(sent, ['Later result']);
+  assert.equal(state.scope('done').lastEventId, 's-new');
+});

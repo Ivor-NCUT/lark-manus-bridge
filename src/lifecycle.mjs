@@ -31,6 +31,7 @@ export class Lifecycle {
 
   async pollAll() {
     for (const scopeId of Object.keys(this.state.data.scopes)) {
+      if (this.state.scope(scopeId)?.status === 'completed') continue;
       try {
         await this.pollScope(scopeId);
       } catch (error) {
@@ -64,7 +65,8 @@ export class Lifecycle {
       cursor = page.has_more ? page.next_cursor : undefined;
       if (page.has_more && !cursor) throw new Error('Manus pagination cursor missing');
     } while (cursor);
-    const newEvents = events.filter((event) => event.id !== binding.lastEventId);
+    const markerIndex = events.findIndex((event) => event.id === binding.lastEventId);
+    const newEvents = markerIndex < 0 ? events : events.slice(markerIndex + 1);
     const statusEvent = [...events].reverse().find((event) => event.type === 'status_update');
     const status = statusEvent?.status_update?.agent_status;
     if (binding.lastEventId && newEvents.length === 0) return;
@@ -119,7 +121,6 @@ export class Lifecycle {
         }
         return;
       }
-      if (binding.status === 'completed') return;
       const answers = newEvents.filter((event) =>
         event.type === 'assistant_message' && event.assistant_message?.content?.trim());
       const answer = [...answers].reverse().find((event) => event.assistant_message.delivery_kind === 'result')
